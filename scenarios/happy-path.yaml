@@ -1,16 +1,35 @@
-# 정상 시나리오 (RUN) — 여러분의 World로 바꾸세요.
+# 정상 시나리오 (RUN) — 접수된 수주심의 요청 케이스가 추출 → 초안 → 발송까지 간다.
 # 형식과 desk-check 방법: scenarios/README.md
 # 판정은 예측(PREDICTION)입니다. 리뷰에서 강사가 실제 Runtime 결과와 비교합니다.
 scenario:
-  name: submit-happy-path
+  name: case-extract-draft-send
   kind: happy-path
-  record: R-1001                  # seed.yaml의 레코드 — status: draft 가 시작 상태
+  record: C-1001                  # seed.yaml의 레코드 — status: case_received 가 시작 상태
   steps:
-    - input: "Submit request R-1001."
-      as: alex
-      transition: submit
+    - input: "추출 검증을 통과한 케이스 C-1001을 추출 완료로 넘긴다."
+      as: drafter_agent
+      transition: case_extract
       expect: ALLOW
       because: >
-        State: R-1001 is draft = submit.from.
-        Role: alex has employee = submit.principal_role.
-        Guard C1_requester_only: principal.id (alex) == request.requester (alex) → true.
+        State: C-1001 is case_received = case_extract.from.
+        Role: drafter_agent has review_drafter = case_extract.principal_role.
+        Guard C9_case_extraction_verified: OrderAcceptanceCase.extraction_verified ("yes") == "yes" 이므로 true
+        (Check-Coverage.ps1가 누락 0으로 통과한 결과).
+        Guard C10_case_set_activated: OrderAcceptanceCase.rule_set.status (RS-001 = set_activated) == "set_activated" → true.
+    - input: "운영 중인 검토규칙세트 RS-001에 근거해 C-1001의 검토의견서 초안을 작성한다."
+      as: drafter_agent
+      transition: case_draft
+      expect: ALLOW
+      because: >
+        State: C-1001 is case_extracted (앞 step 결과) = case_draft.from.
+        Role: drafter_agent has review_drafter = case_draft.principal_role.
+        Guards: none. 세트 확인은 case_extract에서 이미 했으므로, 그 뒤 세트가 대체되어도 초안은 그대로 진행한다.
+    - input: "C-1001의 검토의견서 초안을 접수자에게 메일로 발송한다."
+      as: drafter_agent
+      transition: case_send
+      expect: ALLOW
+      because: >
+        State: C-1001 is case_drafted (앞 step 결과), case_send.from = [case_drafted, case_send_failed]에 포함.
+        Role: drafter_agent has review_drafter = case_send.principal_role.
+        Guard C12_case_send_attempt_limit: OrderAcceptanceCase.send_attempt_count (0) < 3 → true.
+        Effect send_review_email 발생(이 World의 첫 외부 효과). case_sent는 terminal.

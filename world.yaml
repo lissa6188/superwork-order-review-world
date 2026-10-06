@@ -7,57 +7,265 @@
 # ─────────────────────────────────────────────
 
 world:
-  id: my-world                     # 여러분의 World id (예: procurement-approval)
+  id: order-acceptance-review                     # 여러분의 World id (예: procurement-approval)
   version: 0.1.0
   spec: superwork.world/v1         # 언어 버전 — 수정하지 마세요
+  # (예: Process purchase requests safely from submission to delivery.)
   mission: >
-    TODO: 이 세계가 완수하려는 일을 한 문장으로.
-    (예: Process purchase requests safely from submission to delivery.)
-
+    과거 수주심의 덱과 그 검토의견서에서 검토규칙을 도출 및 확정하고 확정된 규칙에 근거해 새 수주심의 덱의 검토의견서 초안을 작성하고 접수자에게 메일로 발송한다.
+    
 # E — Entities: 무엇이 존재하고 추적되는가? (assignment/entity-decisions.md)
 entities:
   # 예시 — 여러분의 도메인으로 교체하세요
-  Request:
+  # 검토규칙세트 
+  ReviewRuleSet:
     attributes:
       id: string
-      amount: money
-      requester: ref(Employee)
+      version: string # 버전
+      analyzed_deck_count: int # 분석한 덱 수
+      decks_since_new_rule_count: int # 신규 규칙 없이 연속 분석한 덱 수
+      pending_review_rule_count: int # 검수대기 규칙 수
       status: state
     owned_state: true              # 상태기계를 갖는 엔티티는 하나로 시작하세요
-  Employee:
+  # 검토규칙 (핵심 엔티티)
+  ReviewRule:
     attributes:
       id: string
-      name: string
-      manager: ref(Employee)
+      source: string # 규칙 출처 
+      review_item: string # 검토항목 분류 (학습 덱에서 수작업으로 추출한 검토항목분류 A~H)
+      condition: string # 조건
+      result_type: string # 결과유형 (Risk, 유의, 확인불가 또는 근거 수치 인용, 원문 기재)
+      rule_set: ref(ReviewRuleSet) # 소속 검토규칙세트
+      referenced_rule: ref(ReviewRule) # 참조 규칙 (개정으로 새로 올린 후보가 어떤 옛 검토규칙을 대신하는지)
+      supporting_evidence_count: int # 지지 근거수
+      opposing_evidence_count: int # 반대 근거수
+      status: state
+    owned_state: true
+  # 학습 덱
+  LearningDeck:
+    attributes:
+      id: string
+      has_opinion_slide: string # 검토의견서 슬라이드 보유 여부 (yes, no)
+      extraction_verified: string # 추출결과 (yes, no) 
+      new_candidate_count: int # 신규 후보 규칙 수
+      rule_set: ref(ReviewRuleSet) # 소속 검토규칙세트
+      status: state
+    owned_state: true
+  # 수주심의 요청케이스
+  OrderAcceptanceCase:
+    attributes:
+      id: string
+      extraction_verified: string # 추출결과 (yes, no)
+      rule_set: ref(ReviewRuleSet) # 소속 검토규칙세트
+      applied_set_version: string # 적용된 검토규칙세트 버전
+      requester: string # 접수자
+      send_attempt_count: int # 발송 시도 횟수
+      status: state
+    owned_state: true
 
 # S — States: 주인공 Entity가 흐름 속 어디에 있는가?
 states:
-  Request:
-    - draft
-    - submitted
-    # TODO: 여러분의 상태들
+  ReviewRuleSet:
+    - set_learning
+    - set_in_transition_review
+    - set_activated
+    - set_replaced
+  ReviewRule:
+    - rule_candidate
+    - rule_in_review
+    - rule_confirmed
+    - rule_on_hold
+    - rule_in_rereview
+    - rule_rejected
+    - rule_retired
+  LearningDeck:
+    - deck_registered
+    - deck_extracted
+    - deck_excluded
+    - deck_analyzed
+  OrderAcceptanceCase:
+    - case_received
+    - case_extracted
+    - case_extraction_failed
+    - case_drafted
+    - case_send_failed
+    - case_sent
 
-terminal_states: []                # 최종 사실 (예: [closed, rejected])
+terminal_states: [set_replaced, rule_retired, rule_rejected, deck_analyzed, deck_excluded, case_sent, case_extraction_failed]                # 최종 사실 (예: [closed, rejected])
 
 # T — Transitions: 무엇이 상태를 바꾸고, 누가 할 수 있는가?
 transitions:
-  submit:
-    from: draft
-    to: submitted
-    principal_role: employee
-    guards: [C1_requester_only]
+  set_submit:
+    from: set_learning
+    to: set_in_transition_review
+    principal_role: rule_learner
+    guards: [C1_set_stable]
+  set_approve:
+    from: set_in_transition_review
+    to: set_activated
+    principal_role: set_approver
+    guards: [C2_set_no_pending_review]
+  set_reject:
+    from: set_in_transition_review
+    to: set_learning
+    principal_role: set_approver
+    guards: []
+    effects: [reset_decks_since_new_rule_count]
+  set_replace:
+    from: set_activated
+    to: set_replaced
+    principal_role: set_approver
+    guards: []
+  rule_submit:
+    from: rule_candidate
+    to: rule_in_review
+    principal_role: rule_learner
+    guards: []
+  rule_confirm:
+    from: rule_in_review
+    to: rule_confirmed
+    principal_role: rule_reviewer
+    guards: [C13_rule_has_supporting_evidence] # Break 후 수정
+    effects: [decrease_pending_review_rule_count]
+  rule_hold:
+    from: rule_in_review
+    to: rule_on_hold
+    principal_role: rule_reviewer
+    guards: []
+    effects: [decrease_pending_review_rule_count]
+  rule_reject:
+    from: rule_in_review
+    to: rule_rejected
+    principal_role: rule_reviewer
+    guards: []
+    effects: [decrease_pending_review_rule_count]
+  rule_resume:
+    from: rule_on_hold
+    to: rule_in_review
+    principal_role: rule_learner
+    guards: []
+    effects: [increase_pending_review_rule_count]
+  rule_reopen:
+    from: rule_confirmed
+    to: rule_in_rereview
+    principal_role: rule_learner
+    guards: [C3_rule_has_opposing_evidence]
+    effects: [increase_pending_review_rule_count]
+  rule_reconfirm:
+    from: rule_in_rereview
+    to: rule_confirmed
+    principal_role: rule_reviewer
+    guards: []
+    effects: [decrease_pending_review_rule_count]
+  rule_retire:
+    from: rule_in_rereview
+    to: rule_retired
+    principal_role: rule_reviewer
+    guards: []
+    effects: [decrease_pending_review_rule_count]
+  deck_extract:
+    from: deck_registered
+    to: deck_extracted
+    principal_role: rule_learner
+    guards: [C4_deck_extraction_verified, C8_deck_has_opinion_slide]
+  deck_exclude:
+    from: deck_registered
+    to: deck_excluded
+    principal_role: rule_learner
+    guards: [C5_deck_no_opinion_slide]
+  deck_analyze_new_rule:
+    from: deck_extracted
+    to: deck_analyzed
+    principal_role: rule_learner
+    guards: [C6_deck_has_new_rule]
+    effects: [increase_analyzed_deck_count, reset_decks_since_new_rule_count, increase_pending_review_rule_count]
+  deck_analyze_no_new_rule:
+    from: deck_extracted
+    to: deck_analyzed
+    principal_role: rule_learner
+    guards: [C7_deck_no_new_rule]
+    effects: [increase_analyzed_deck_count, increase_decks_since_new_rule_count]
+  case_extract:
+    from: case_received
+    to: case_extracted
+    principal_role: review_drafter
+    guards: [C9_case_extraction_verified, C10_case_set_activated]
+  case_fail_extraction:
+    from: case_received
+    to: case_extraction_failed
+    principal_role: review_drafter
+    guards: [C11_case_extraction_not_verified]
+  case_draft:
+    from: case_extracted
+    to: case_drafted
+    principal_role: review_drafter
+    guards: []
+  case_send:
+    from: [case_drafted, case_send_failed]
+    to: case_sent
+    principal_role: review_drafter
+    guards: [C12_case_send_attempt_limit]
+    effects: [send_review_email]
+  case_fail_send:
+    from: [case_drafted, case_send_failed]
+    to: case_send_failed
+    principal_role: review_drafter
+    guards: [C12_case_send_attempt_limit]
+    effects: [increase_send_attempt_count]
 
 # C — Constraints: 무엇이 절대 허용되면 안 되는가?
 constraints:
-  C1_requester_only:
-    expr: principal.id == request.requester
-    message: Only the requester can submit.
+  C1_set_stable:
+    expr: ReviewRuleSet.decks_since_new_rule_count >= 3
+    message: 신규 규칙 없이 연속 3개 덱을 분석한 검토규칙세트만 승인 요청할 수 있다.
+  C2_set_no_pending_review:
+    expr: ReviewRuleSet.pending_review_rule_count == 0
+    message: 검수대기 규칙이 0건이어야 운영 전환을 승인할 수 있다.
+  C3_rule_has_opposing_evidence:
+    expr: ReviewRule.opposing_evidence_count > 0
+    message: 반대 증거가 있는 규칙만 재검수할 수 있다.
+  C4_deck_extraction_verified:
+    expr: LearningDeck.extraction_verified == "yes"
+    message: 추출 검증을 통과한 덱만 분석 단계로 넘길 수 있다.
+  C5_deck_no_opinion_slide:
+    expr: LearningDeck.has_opinion_slide == "no"
+    message: 검토의견서 슬라이드가 없는 덱만 학습에서 제외할 수 있다.
+  C6_deck_has_new_rule:
+    expr: LearningDeck.new_candidate_count > 0
+    message: 신규 후보 규칙이 있는 덱만 신규 규칙 분석 완료로 처리한다.
+  C7_deck_no_new_rule:
+    expr: LearningDeck.new_candidate_count == 0
+    message: 신규 후보 규칙이 없는 덱만 신규 규칙 없음 분석 완료로 처리한다.
+  C8_deck_has_opinion_slide:
+    expr: LearningDeck.has_opinion_slide == "yes"
+    message: 검토의견서 슬라이드가 있는 덱만 학습할 수 있다.
+  C9_case_extraction_verified:
+    expr: OrderAcceptanceCase.extraction_verified == "yes"
+    message: 추출 검증을 통과한 케이스만 초안 작성 단계로 넘길 수 있다.
+  C10_case_set_activated:
+    expr: OrderAcceptanceCase.rule_set.status == "set_activated"
+    message: 케이스에 적용된 검토규칙세트가 운영 중인 상태여야 진행할 수 있다.
+  C11_case_extraction_not_verified:
+    expr: OrderAcceptanceCase.extraction_verified == "no"
+    message: 추출 검증을 통과하지 못한 케이스만 추출 실패 단계로 넘길 수 있다.
+  C12_case_send_attempt_limit:
+    expr: OrderAcceptanceCase.send_attempt_count < 3
+    message: 발송 시도는 3회까지만 할 수 있다.
+  C13_rule_has_supporting_evidence:
+    expr: ReviewRule.supporting_evidence_count > 0
+    message: 지지 근거가 1건 이상인 규칙만 확정할 수 있다.
 
 # 행위자 — 시나리오의 `as`는 여기의 id를 씁니다
 principals:
-  - id: alex
-    name: Alex
-    roles: [employee]
-  - id: blake
-    name: Blake
-    roles: [employee]
+  - id: rule_learning_agent
+    name: Rule_Learning_Agent
+    roles: [rule_learner]
+  - id: sapjiler
+    name: 삽질러(빌더)
+    roles: [rule_reviewer]
+  - id: gildong
+    name: 홍길동
+    roles: [set_approver]
+  - id: drafter_agent
+    name: Drafter_Agent
+    roles: [review_drafter]

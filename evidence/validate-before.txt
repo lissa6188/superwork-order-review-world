@@ -1,0 +1,20 @@
+SUPERWORK WORLD SUMMARY
+
+World          order-acceptance-review
+Version        0.1.0
+Spec           superwork.world/v1
+
+Entities       4
+States         21
+Transitions    21
+Constraints    12
+
+Schema         PASS
+References     PASS
+Transitions    PASS
+Constraints    PASS
+
+Warnings       0
+
+READY FOR STUDIO IMPORT ✓
+

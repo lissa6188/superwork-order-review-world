@@ -2,10 +2,48 @@
 # scenarios/*.yaml 의 `record:` 가 여기의 id를 가리키고, 그 레코드의 status가 시작 상태입니다.
 # 다른 시작 상태가 필요하면 레코드를 추가하세요 (status는 world.yaml에 선언된 state여야 합니다).
 # 리뷰에서 강사가 이 레코드로 여러분의 시나리오를 실제 Runtime에서 실행합니다.
+# 실제 회사·고객·금액은 넣지 않는다(익명화).
 records:
-  - type: Request
-    id: R-1001
-    status: draft
+  # 운영 중인 검토규칙세트 — 케이스가 접수 시 고정해서 물고 가는 세트
+  - type: ReviewRuleSet
+    id: RS-001
+    status: set_activated
     attributes:
-      amount: 1200
-      requester: alex
+      version: "1.0"
+      analyzed_deck_count: 10
+      decks_since_new_rule_count: 3
+      pending_review_rule_count: 0
+
+  # 다음 버전 세트 — 운영 중인 RS-001과 따로 학습 중 (학습·운영 분리)
+  - type: ReviewRuleSet
+    id: RS-002
+    status: set_learning
+    attributes:
+      version: "2.0"
+      analyzed_deck_count: 1
+      decks_since_new_rule_count: 0
+      pending_review_rule_count: 1
+
+  # 검수 중인 검토규칙 후보 — 지지 근거가 아직 0건 (공격 시나리오용)
+  - type: ReviewRule
+    id: R-B9
+    status: rule_in_review
+    attributes:
+      source: "학습 덱 D-11 검토의견서"
+      review_item: "B"
+      condition: "수익성 지표가 기준값 미만이면"
+      result_type: "Risk"
+      rule_set: RS-002
+      supporting_evidence_count: 0
+      opposing_evidence_count: 0
+
+  # 접수된 수주심의 요청 케이스 — 추출 검증(Check-Coverage.ps1)을 누락 0으로 통과한 덱
+  - type: OrderAcceptanceCase
+    id: C-1001
+    status: case_received
+    attributes:
+      extraction_verified: "yes"
+      rule_set: RS-001
+      applied_set_version: "1.0"
+      requester: sales_team_a
+      send_attempt_count: 0

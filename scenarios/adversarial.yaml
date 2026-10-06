@@ -1,17 +1,19 @@
-# 공격 시나리오 (BREAK) — 여러분의 World가 막아야 하는 일을 "일어나게" 시도합니다.
+# 공격 시나리오 (BREAK) — 지지 근거가 0건인 검토규칙을 검수자가 확정한다.
 # 형식과 desk-check 방법: scenarios/README.md · 기록: assignment/break-fix.md
 # 판정은 예측(PREDICTION)입니다. 리뷰에서 강사가 실제 Runtime 결과와 비교합니다.
 scenario:
-  name: submit-by-someone-else
+  name: confirm-rule-without-evidence
   kind: adversarial
-  record: R-1001
-  protects: "Only the requester can submit their own request."
+  record: R-B9                    # seed.yaml의 레코드 — status: rule_in_review, supporting_evidence_count: 0
+  protects: "확정되는 검토규칙은 과거 검토의견서에서 지지 근거가 1건 이상 있어야 한다 (근거 없는 규칙이 초안에 쓰이지 않게)."
   steps:
-    - input: "Submit request R-1001."
-      as: blake                   # 요청자가 아닌 다른 employee
-      transition: submit
-      expect: DENY                # 여러분의 예측 — 틀려도 괜찮습니다
+    - input: "지지 근거가 0건인 검토규칙 R-B9를 확정한다."
+      as: sapjiler                # 검수자(빌더)
+      transition: rule_confirm
+      expect: ALLOW               # 수정 전 예측 — 빈틈 (FIX 후 재판정은 break-fix.md)
       because: >
-        State: R-1001 is draft = submit.from.
-        Role: blake has employee = submit.principal_role.
-        Guard C1_requester_only: principal.id (blake) == request.requester (alex) → false → DENY.
+        State: R-B9 is rule_in_review = rule_confirm.from.
+        Role: sapjiler has rule_reviewer = rule_confirm.principal_role.
+        Guards: none — rule_confirm에는 근거 수를 확인하는 constraint가 없다.
+        따라서 결과는 ALLOW. supporting_evidence_count (0)인 규칙이 확정되고, effect decrease_pending_review_rule_count로
+        RS-002의 검수대기 수가 줄어 C2_set_no_pending_review(운영 전환 승인 조건)까지 채워질 수 있다.
